@@ -2,6 +2,7 @@ suite: environment values files render as expected
 templates:
   - deployment.yaml
   - hpa.yaml
+  - pdb.yaml
 
 tests:
   - it: dev uses Never pull policy and a small resource footprint
@@ -41,3 +42,7 @@ tests:
           path: spec.maxReplicas
           value: 10
         template: hpa.yaml
+      - equal:
+          path: spec.minAvailable
+          value: 2
+        template: pdb.yaml

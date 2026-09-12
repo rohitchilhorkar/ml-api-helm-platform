@@ -1,7 +1,8 @@
 """Train a tiny classifier and pickle it. Run once, at image build time.
 
-Not a real training pipeline (no data versioning, no experiment tracking) -
-this exists purely so the API has a real, loadable model artifact to serve.
+This is not a real training pipeline. There is no data versioning and no
+experiment tracking. It only exists so the API has a real, loadable model
+file to serve.
 """
 import joblib
 from sklearn.datasets import load_iris

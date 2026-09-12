@@ -1,6 +1,7 @@
-# Platform defaults. These are safe, generic values every environment inherits
-# unless a values-<env>.yaml file overrides them. An MLE onboarding a new ML API
-# to this chart typically only needs to touch image.repository/image.tag and env.
+# Platform defaults. These are safe, generic values that every environment
+# inherits, unless a values-<env>.yaml file overrides them. An MLE who is
+# onboarding a new ML API to this chart usually only needs to change
+# image.repository, image.tag, and env.
 
 image:
   repository: ml-api
@@ -9,8 +10,8 @@ image:
 
 replicaCount: 1
 
-# Ignored when autoscaling.enabled is true - the HPA owns replica count then,
-# and replicaCount would only fight it on every `helm upgrade`.
+# Ignored when autoscaling.enabled is true. The HPA owns replica count then.
+# replicaCount would only fight it on every `helm upgrade`.
 autoscaling:
   enabled: false
   minReplicas: 1
@@ -38,24 +39,24 @@ resources:
 
 secrets:
   # Name of a Kubernetes Secret that already exists in the cluster, created
-  # out-of-band (kubectl, a CI pipeline, or a real secrets operator like
-  # External Secrets / Sealed Secrets / the AWS Secrets Manager CSI driver).
-  # This is the production-safe path - preferred whenever it's set.
+  # outside Helm (kubectl, a CI pipeline, or a real secrets operator like
+  # External Secrets, Sealed Secrets, or the AWS Secrets Manager CSI driver).
+  # This is the safe path for production. It is used whenever it is set.
   existingSecret: ""
 
-  # Chart-managed Secret, for local/demo convenience only. NEVER put real
-  # values here in a values-*.yaml file that gets committed to git - pass
-  # them with --set at install time instead, e.g.:
+  # Chart-managed Secret, for local demo use only. Never put real values
+  # here in a values-*.yaml file that gets committed to git. Pass them
+  # with --set at install time instead, for example:
   #   helm install ... --set secrets.create=true --set secrets.data.API_KEY=$API_KEY
-  # so the plaintext only ever exists in your shell/CI secret store, never
-  # in a file in this repo.
+  # This way the plain text value only ever lives in your shell or CI
+  # secret store, never in a file in this repo.
   create: false
   data: {}
 
 serviceAccount:
   # Create a dedicated ServiceAccount for this release instead of using
   # "default". automount is false because this API never calls the
-  # Kubernetes API itself - no reason to hand it a token that could do so.
+  # Kubernetes API itself. There is no reason to hand it a token that could.
   create: true
   automount: false
   name: ""
@@ -71,6 +72,15 @@ containerSecurityContext:
   capabilities:
     drop:
       - ALL
+
+# Stops voluntary evictions (node drains, cluster upgrades) from taking
+# down more than this many replicas at once. Off by default. With
+# replicaCount: 1 in dev and staging, minAvailable: 1 would block the only
+# pod from ever being evicted, which defeats the point. This is meant for
+# prod, where minReplicas is greater than 1.
+podDisruptionBudget:
+  enabled: false
+  minAvailable: 1
 
 probes:
   liveness:

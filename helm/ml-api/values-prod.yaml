@@ -1,7 +1,7 @@
 # Prod overrides only what differs from values.yaml.
-# Autoscaling owns replica count here - replicaCount is intentionally not
-# set, since it would be ignored (and would be misleading to read) once
-# autoscaling.enabled is true.
+# Autoscaling owns replica count here. replicaCount is left unset on
+# purpose. It would be ignored once autoscaling.enabled is true, and
+# leaving it in would just be confusing to read.
 
 image:
   repository: 123456789012.dkr.ecr.us-east-1.amazonaws.com/ml-api
@@ -11,6 +11,12 @@ autoscaling:
   minReplicas: 3
   maxReplicas: 10
   targetCPUUtilizationPercentage: 70
+
+# minAvailable: 2 out of a range of 3 to 10 leaves exactly one replica free
+# to be disrupted at a time, during a node drain or a cluster upgrade.
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 2
 
 resources:
   requests:

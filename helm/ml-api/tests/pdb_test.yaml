@@ -1,0 +1,20 @@
+suite: PodDisruptionBudget conditional rendering
+templates:
+  - pdb.yaml
+
+tests:
+  - it: does not render by default
+    asserts:
+      - hasDocuments:
+          count: 0
+
+  - it: renders with the configured minAvailable when enabled
+    set:
+      podDisruptionBudget.enabled: true
+      podDisruptionBudget.minAvailable: 2
+    asserts:
+      - hasDocuments:
+          count: 1
+      - equal:
+          path: spec.minAvailable
+          value: 2

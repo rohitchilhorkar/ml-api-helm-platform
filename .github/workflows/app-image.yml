@@ -1,13 +1,13 @@
 name: App Image CI/CD
 
-# Builds and publishes the ml-api container image that the chart's
-# image.repository/image.tag values point at. Separate from
-# helm-chart.yml on purpose: the app and the chart version independently
-# (see the README's version-control section), so they get separate
-# pipelines with separate triggers.
+# Builds and publishes the ml-api container image. This is the image that the
+# chart's image.repository and image.tag values point at. Kept separate from
+# helm-chart.yml on purpose. The app and the chart move on their own
+# schedules (see the README's version control section), so they get
+# separate pipelines with separate triggers.
 #
-# PRs only ever run the build-and-smoke-test job - nothing is pushed from a PR.
-# Only a push to main (i.e. a merged PR) can reach the publish job.
+# PRs only run the build and smoke test job. Nothing is pushed from a PR.
+# Only a push to main, which means a merged PR, can reach the publish job.
 on:
   pull_request:
     paths:
@@ -18,6 +18,12 @@ on:
     paths:
       - "app/**"
       - "helm/ml-api/Chart.yaml"
+
+# A second push to the same branch or PR replaces the first one.
+# There is no reason to let both runs finish.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 env:
   APP_PATH: app
@@ -30,6 +36,9 @@ jobs:
   build:
     name: Build and Smoke Test
     runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v4
 
@@ -39,6 +48,18 @@ jobs:
 
       - name: Build image
         run: docker build -t ml-api:${{ steps.version.outputs.tag }} "$APP_PATH"
+
+      - name: Scan image for known vulnerabilities
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: ml-api:${{ steps.version.outputs.tag }}
+          format: table
+          severity: HIGH,CRITICAL
+          # Report only for now. Failing the build on every HIGH or CRITICAL
+          # finding in the python:3.12-slim base image would make this red by
+          # default, with no process here to triage or allow findings.
+          # Change to exit-code: '1' once that process exists.
+          exit-code: "0"
 
       - name: Smoke test the built image
         run: |
@@ -63,10 +84,11 @@ jobs:
     needs: build
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     permissions:
-      # id-token: write is what lets this job request an OIDC token from
-      # GitHub to exchange for short-lived AWS credentials - no AWS access
-      # keys are stored as repo secrets at all.
+      # id-token: write lets this job ask GitHub for an OIDC token.
+      # That token is traded for short-lived AWS credentials.
+      # No AWS access keys are stored as repo secrets at all.
       id-token: write
       contents: read
     steps:

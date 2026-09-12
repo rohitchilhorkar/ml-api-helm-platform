@@ -1,44 +1,42 @@
 # ml-api Helm Platform
 
-A generic, production-shaped Helm chart for deploying ML inference APIs, plus a small
-real service (`ml-api`) that exercises every knob the chart exposes.
+A generic Helm chart for deploying ML inference APIs, plus a small real service
+(`ml-api`) that uses every option the chart has.
 
 This is a take-home for **Money Forward India, MLOps Platform Engineering**. The
-assignment is explicit that grading is on *approach, feasibility, and outside-the-box
-thinking*, not on running production infrastructure.
+assignment says clearly that grading is on *approach, feasibility, and outside the box
+thinking*. It is not about running production infrastructure.
 
 ## The idea
 
-Most take-homes in this space produce a Deployment YAML and call it done. The scenario
-here is deliberately platform-shaped instead: **a platform team owns one Helm chart**,
-and **MLEs onboard their models to it by writing a handful of lines in a values file**,
-never touching a template. The chart owns everything that's easy to get wrong and
-expensive to get wrong differently across teams (probes, security context, resource
-tiers, autoscaling, secrets wiring), and exposes only what a model actually differs on:
-image, env vars, resource sizing.
+The setup here is platform style on purpose. **A platform team owns one Helm chart.**
+**MLEs onboard their models to it by writing a few lines in a values file.** They never
+touch a template. The chart owns everything that is easy to get wrong: probes, security
+context, resource tiers, autoscaling, secrets. It only exposes what a model actually
+differs on: image, env vars, resource sizing.
 
-The sample app (`app/`) is a real FastAPI service serving a tiny scikit-learn Iris
-classifier, not a static "Hello World." The assignment explicitly allows the latter,
-but a real model gives probes, model-version metadata, and the security posture
-something genuine to be tested against.
+The sample app (`app/`) is a real FastAPI service. It serves a tiny scikit-learn Iris
+classifier, not a static "Hello World". The assignment allows a plain "Hello World"
+image, but a real model gives the probes, the model version metadata, and the security
+posture something real to test against.
 
 ## Repo layout
 
 ```
 app/            FastAPI + sklearn sample ML API (the thing being deployed)
 helm/ml-api/    The generic Helm chart, the actual deliverable
-  templates/    Deployment, Service, HPA, Secret, ServiceAccount, helm-test hook
+  templates/    Deployment, Service, HPA, PDB, Secret, ServiceAccount, helm test hook
   tests/        helm-unittest specs (static, offline, run in CI on every PR)
   values.yaml   Platform defaults every environment inherits
-  values-{dev,staging,prod}.yaml   Per-environment overrides, MLE-facing surface
-iac/terraform/  Small Terraform snippet: same chart, invoked via `helm_release`
-.github/workflows/helm-chart.yml   CI/CD: lint/test/validate, package, publish to ECR
-.github/workflows/app-image.yml    CI/CD: build/smoke-test/publish the app image
+  values-{dev,staging,prod}.yaml   Per-environment overrides, the MLE-facing part
+iac/terraform/aws-eks/  Terraform: builds a real EKS cluster, deploys the chart onto it
+.github/workflows/helm-chart.yml   CI/CD: lint, test, validate, package, publish to ECR
+.github/workflows/app-image.yml    CI/CD: build, smoke test, publish the app image
 ```
 
 ## Prerequisites
 
-Everything below runs entirely on a local machine, no cloud account needed.
+Everything below runs on a local machine. No cloud account is needed.
 
 **macOS** (Homebrew):
 
@@ -55,32 +53,32 @@ helm plugin install https://github.com/helm-unittest/helm-unittest.git
 ```
 
 Restart the terminal after `winget install` so the new `PATH` entries take effect. The
-`helm plugin install` step needs Git for Windows on `PATH` (`winget install Git.Git` if
-it isn't already); Docker Desktop needs WSL 2 enabled and must be running before
-`minikube start`. Everywhere else in this README, run the same commands from PowerShell
-as-is; the only Windows-specific difference is this install step and using PowerShell's
-line-continuation (`` ` ``) instead of `\` if a command is split across lines.
+`helm plugin install` step needs Git for Windows on `PATH` (run `winget install Git.Git`
+if it is not there yet). Docker Desktop needs WSL 2 enabled and running before
+`minikube start`. Every other command in this README works the same in PowerShell. The
+only real difference is this install step, and PowerShell uses `` ` `` for line
+continuation instead of `\`.
 
-**Linux**: same package names are available via the distro's package manager (`apt`,
-`dnf`, `pacman`, ...) or each tool's official install script; Docker Engine substitutes
-for Docker Desktop.
+**Linux**: the same tools are available through the distro package manager (`apt`,
+`dnf`, `pacman`, or similar) or each tool's own install script. Docker Engine takes the
+place of Docker Desktop.
 
-Versions this was built and verified against: Docker 29, Minikube v1.39, kubectl
-v1.37, Helm v4.1 (`helm-unittest` plugin v1.1.2), Terraform 1.5.7. A Docker daemon
-(Docker Desktop, Colima, or Docker Engine) needs to be running before `minikube start`.
+Versions this was built and tested against: Docker 29, Minikube v1.39, kubectl v1.37,
+Helm v4.1 (`helm-unittest` plugin v1.1.2), Terraform 1.5.7. A Docker daemon (Docker
+Desktop, Colima, or Docker Engine) needs to be running before `minikube start`.
 
 ## Quickstart (Minikube)
 
 ```bash
 minikube start
 
-# Build the app image and load it straight into the node, no registry needed locally
+# Build the app image and load it straight into the node. No registry needed locally.
 docker build -t ml-api:v2 app/
 minikube image load ml-api:v2
 
 helm unittest helm/ml-api                                   # static chart tests
 helm upgrade --install ml-api helm/ml-api -f helm/ml-api/values-dev.yaml
-helm test ml-api                                             # live smoke test (see below)
+helm test ml-api                                             # live smoke test, see below
 
 kubectl port-forward svc/ml-api 8000:80
 curl http://127.0.0.1:8000/health
@@ -91,158 +89,176 @@ curl -X POST http://127.0.0.1:8000/predict \
 
 ## The chart
 
-**One chart, three environments, no branching.** `values.yaml` is the full schema and
-the platform-safe defaults (probes, security context, resource requests/limits,
-ServiceAccount). Each `values-{dev,staging,prod}.yaml` overrides *only what differs*;
-`values-staging.yaml` is a single line. Environments differ by config, never by template
-logic, so there is no `{{ if .Values.environment == "prod" }}` anywhere in this chart.
-That's what makes "MLE edits a minimal values file" true rather than aspirational.
+**One chart, three environments, no branching.** `values.yaml` holds the full schema
+and the safe platform defaults: probes, security context, resource requests and limits,
+ServiceAccount. Each `values-{dev,staging,prod}.yaml` only overrides what is different.
+`values-staging.yaml` is a single line. Environments differ only by config, never by
+template logic. There is no `{{ if .Values.environment == "prod" }}` anywhere in this
+chart. That is what makes "MLE edits a minimal values file" actually true.
 
-**Security posture is opt-out, not opt-in.** Every release gets a non-root user, a
-read-only root filesystem, all Linux capabilities dropped, and a dedicated
-`ServiceAccount` with no mounted API token, by default, with no values file needing to
-ask for it.
+**Security is on by default, not something you turn on.** Every release gets a non-root
+user, a read-only root filesystem, all Linux capabilities dropped, and its own
+`ServiceAccount` with no mounted API token. No values file has to ask for this.
 
-**HPA and `replicaCount` never fight.** The Deployment omits `replicas:` entirely when
-`autoscaling.enabled` is true, so a `helm upgrade` can't undo what the HPA just did under
-load.
+**HPA and `replicaCount` never fight each other.** The Deployment leaves out
+`replicas:` completely when `autoscaling.enabled` is true. This means a `helm upgrade`
+cannot undo what the HPA just did under load.
 
-**Secrets have exactly one production-safe path.** `existingSecret` references a Secret
-created out-of-band by a real secrets system (External Secrets, Sealed Secrets, the AWS
-Secrets Manager CSI driver, ...) and always wins when set. The chart can also manage a
-Secret itself (`secrets.create: true`), but that path exists only for local demos and
-must be populated with `--set` at install time, never committed to a values file.
-Verified end-to-end on Minikube: a secret passed via
-`--set secrets.data.API_KEY=...` reaches the container as an env var, and the plaintext
-never touches a file in this repo.
+**A PodDisruptionBudget protects prod, and is off everywhere else.**
+`podDisruptionBudget.enabled` is `false` by default. With `replicaCount: 1` in
+dev and staging, `minAvailable: 1` would block the only pod from ever being evicted.
+That would stop a node drain or a cluster upgrade from finishing. `values-prod.yaml`
+turns it on with `minAvailable: 2` against a range of 3 to 10 replicas. This leaves
+exactly one replica free to be disrupted at a time.
 
-**Two independent test layers**, because a chart can render perfect YAML and still
-deploy an app that never answers a request, or the reverse:
+**Secrets have exactly one path meant for production.** `existingSecret` points at a
+Secret created outside Helm, by a real secrets system such as External Secrets, Sealed
+Secrets, or the AWS Secrets Manager CSI driver. It always wins when it is set. The chart
+can also manage a Secret itself (`secrets.create: true`), but that path is only for
+local demos. It must only be filled in with `--set` at install time, never committed to
+a values file. This was checked end to end on Minikube: a secret passed with
+`--set secrets.data.API_KEY=...` reaches the container as an env var. The plain text
+value never touches a file in this repo.
 
-- `helm unittest helm/ml-api`: 16 static assertions over template output, covering
-  defaults, security context, HPA/Secret conditional rendering, the `required()`
-  guardrails on `image.repository`/`image.tag`, and the real dev/staging/prod values
-  files. Runs in CI on every PR that touches `helm/**`.
-- `helm test ml-api`: a `helm.sh/hook: test` Pod that curls `/health` and `/predict`
-  against a real, running release and checks it gets back an actual prediction.
+**Two test layers, checked separately.** A chart can render perfect YAML and still run
+an app that never answers a request. It can also do the reverse.
+
+- `helm unittest helm/ml-api`: 18 static checks on the rendered templates. This covers
+  defaults, security context, HPA and PDB and Secret conditional rendering, the
+  `required()` guards on `image.repository` and `image.tag`, and the real dev, staging,
+  and prod values files. Runs in CI on every PR that touches `helm/**`.
+- `helm test ml-api`: a `helm.sh/hook: test` Pod that calls `/health` and `/predict` on
+  a real, running release, and checks it gets back an actual prediction.
 
 ## CI/CD
 
-Two independent pipelines, because the app image and the chart version independently
-(see Version-control strategy below) and shouldn't rebuild each other on every change:
+Two pipelines, kept separate because the app image and the chart version on their own
+schedules (see Version control strategy below), and should not rebuild each other on
+every change:
 
 **[.github/workflows/helm-chart.yml](.github/workflows/helm-chart.yml)**, the chart pipeline:
 
-1. **`validate`** (every PR touching `helm/**`): `helm lint`, then `helm unittest`,
-   then render `values-{dev,staging,prod}.yaml` with `helm template`, then validate
-   every rendered manifest against the Kubernetes API schema with `kubeconform`.
-2. **`publish`** (push to `main` only, gated on `validate` passing): reads the chart
-   version out of `Chart.yaml`, authenticates to AWS via OIDC (no long-lived access keys
-   stored as a repo secret), refuses to run if that version is already published, then
-   `helm package`s and `helm push`es the chart to a **private ECR OCI repository**.
+1. **`validate`** (every PR touching `helm/**`): runs `helm lint`, then `helm unittest`,
+   then renders `values-{dev,staging,prod}.yaml` with `helm template`, then checks every
+   rendered manifest against the Kubernetes API schema with `kubeconform`.
+2. **`publish`** (only on push to `main`, only after `validate` passes): reads the chart
+   version from `Chart.yaml`, logs in to AWS through OIDC (no long-lived access keys
+   stored as a repo secret), stops if that version is already published, then packages
+   the chart and pushes it to a **private ECR OCI repository**.
 
 **[.github/workflows/app-image.yml](.github/workflows/app-image.yml)**, the app image pipeline:
 
-1. **`build`** (every PR touching `app/**` or `Chart.yaml`): builds the Docker image and
-   runs a container smoke test against a real running container (`/health`, then
-   `/predict` with a real payload, checking the response actually contains a prediction).
-2. **`publish`** (push to `main` only, gated on `build` passing): authenticates to AWS
-   via OIDC, refuses to run if the image tag (read from `Chart.yaml`'s `appVersion`) is
+1. **`build`** (every PR touching `app/**` or `Chart.yaml`): builds the Docker image,
+   scans it for known vulnerabilities, then runs a smoke test against a real running
+   container: calls `/health`, then `/predict` with a real payload, and checks the
+   response actually holds a prediction.
+2. **`publish`** (only on push to `main`, only after `build` passes): logs in to AWS
+   through OIDC, stops if the image tag (read from `Chart.yaml`'s `appVersion`) is
    already published, then builds and pushes to the same private ECR account the chart
    uses.
 
-The registry, account ID, and IAM role ARNs in both workflows are placeholders. There's
-no real AWS account behind this take-home to publish to, and the assignment doesn't
-expect one. Both workflows are written to be *correct*, not to actually execute against
-real infrastructure. ECR was chosen over GHCR/Harbor/Artifact Registry
-specifically so the app image and the chart share one registry story rather than two.
+The registry, account ID, and IAM role ARNs in both workflows are placeholders. There
+is no real AWS account behind this take-home to publish to, and the assignment does not
+expect one. Both workflows are written to be correct, not to actually run against real
+infrastructure. ECR was picked over GHCR, Harbor, or Artifact Registry so the app image
+and the chart share one registry, not two.
 
 ## IaC (Terraform)
 
-[iac/terraform/](iac/terraform/) is a deliberately small snippet, clean through
-`terraform init`/`validate`/`plan` against the same Minikube kubeconfig used everywhere
-else in this README. A single `helm_release` resource installs the exact same chart
-with the exact same `values-<environment>.yaml` overlay `helm upgrade --install` uses.
-Terraform plugs in as *a caller of the chart*, not a reimplementation of it. It
-intentionally does not provision a cluster, VPC, or IAM: that's out of scope for "chart
-deployed to a cluster" and would need real cloud credentials this take-home doesn't have.
+[iac/terraform/aws-eks/](iac/terraform/aws-eks/) builds a real EKS cluster (VPC, a
+managed node group, the full setup) using the `terraform-aws-modules` registry modules,
+then deploys the chart onto it from the private ECR repo the CI/CD pipeline publishes
+to. This is the literal reading of the assignment's IaC ask: code that would cost real
+money to run. So `plan` and `apply` were never run on purpose. Only `terraform init` and
+`terraform validate` were run, and both pass cleanly with no AWS credentials involved.
 
 ```bash
-cd iac/terraform
+cd iac/terraform/aws-eks
 terraform init
-terraform plan -var="environment=dev"   # targets Minikube by default, zero cloud spend
+terraform validate
 ```
 
-Verified live against a running Minikube cluster (not just `validate`): `plan` resolves a
-real `1 to add` diff against the actual dev values. `apply` was deliberately not run here,
-to avoid installing a second, Terraform-managed release on top of the one the Quickstart
-above already manages directly through `helm`; running it against an empty namespace
-works the same way.
+## Version control strategy
 
-## Version-control strategy
+- **Trunk based, `main` is protected.** Every change lands through a PR. The `validate`
+  CI job (lint, unit tests, schema check) must pass before a merge.
+- **The chart version is the release boundary, not a branch.** `Chart.yaml`'s `version`
+  is bumped using semver: patch for template or values fixes, minor for new features,
+  major for breaking changes to the values schema. This happens in the same PR as the
+  change. The `publish` job fails the merge to `main` if that version is already in the
+  registry, so the version bump is enforced, not just a convention people are supposed
+  to remember.
+- **`appVersion` tracks the app. `version` tracks the chart. They move on their own.** A
+  chart only change, like a new probe option, bumps `version` without touching
+  `appVersion`. A new model image bumps `appVersion` (usually just
+  `values-<env>.yaml`'s `image.tag`) without needing to touch the chart at all.
+- **Environments move forward through values files, not branches.** There is no
+  `dev`, `staging`, or `prod` branch. One chart version moves from dev to staging to
+  prod by pointing each environment's `helm upgrade` at that same, already published
+  chart version, with its own values file. This avoids the usual problem of not knowing
+  which branch is actually running in prod.
+- **No secrets in git, ever.** This is enforced by how the chart is built, not just by a
+  rule people are told to follow. See Secrets above.
 
-- **Trunk-based, `main` protected.** All changes land via PR; the `validate` CI job
-  (lint, unit tests, schema validation) is a required check before merge.
-- **Chart version is the release boundary, not a branch.** `Chart.yaml`'s `version` is
-  bumped semver-style (patch for template/values fixes, minor for new capabilities, major
-  for breaking values-schema changes) in the same PR as the change. The `publish` job
-  hard-fails a merge to `main` if that version is already in the registry, so the version
-  bump is enforced, not a convention people forget.
-- **`appVersion` tracks the app, `version` tracks the chart, and they move
-  independently.** A chart-only change (e.g. adding a new probe knob) bumps `version`
-  without touching `appVersion`; a new model image bumps `appVersion` (and typically
-  just `values-<env>.yaml`'s `image.tag`) without necessarily touching the chart at all.
-- **Environments are promoted through values files, not branches.** There is no
-  `dev`/`staging`/`prod` branch per environment. One chart version is promoted from dev
-  to staging to prod by pointing each environment's `helm upgrade` at that same
-  immutable, already-published chart version with its own values file. This avoids the
-  classic "which branch is actually in prod" drift that per-environment branching
-  produces.
-- **No secrets in git, ever**, enforced structurally rather than by policy. See Secrets
-  above.
+## Outside the box ideas
 
-## Outside-the-box / novel ideas
+Built already:
 
-Implemented now:
+- **Model and app metadata comes from the platform itself.** `MODEL_VERSION` is set
+  from `image.tag`, not typed in by hand. `app.kubernetes.io/version` carries the same
+  value as a label, so `kubectl get pods -L app.kubernetes.io/version` answers "which
+  model version is running" without calling the API at all.
+- **One health contract every onboarded ML API must follow.** `probes.*` in
+  `values.yaml`, plus a documented `/health` path, means the platform team defines what
+  "ready" means once. No model team has to invent its own probes.
+- **Resource defaults that care about cost.** Dev asks for 50m CPU and 64Mi memory.
+  Prod asks for 250m and 256Mi, and turns on HPA (3 to 10 replicas). The defaults push
+  toward not paying for dev or staging capacity nobody needs, without an MLE having to
+  think about it.
 
-- **Model/app metadata surfaced through the platform itself.** `MODEL_VERSION` is
-  injected from `image.tag` (not hand-maintained), and `app.kubernetes.io/version`
-  carries the same value as a label, so `kubectl get pods -L app.kubernetes.io/version`
-  answers "which model version is actually running" without hitting the API.
-- **A standardized health contract every onboarded ML API must satisfy.** `probes.*`
-  in `values.yaml` plus a documented `/health` convention means the platform team
-  defines what "ready" means once, instead of every model team reinventing probes.
-- **Cost-aware environment defaults.** Dev requests 50m CPU / 64Mi memory; prod requests
-  250m / 256Mi and turns on HPA (3-10 replicas). The chart's defaults nudge toward not
-  overpaying for dev/staging capacity nobody needs, without an MLE having to know to ask.
+What could be added next:
 
-Sketched as future evolution rather than built (time-boxed for a take-home, called out
-honestly rather than implied as done):
+- **Progressive delivery, or canary releases.** The chart's `service` and `Deployment`
+  selector already keep one release's Pods separate and clean. The next step would be a
+  second, weighted Service (or a service mesh traffic split), driven by the same
+  values-file pattern, for example `canary.weight: 10`. A canary rollout would still
+  just mean "edit a values file", nothing new to learn.
+- **GitOps with ArgoCD.** This chart already does not care how `helm upgrade` gets
+  called. Pointing an ArgoCD `Application` at the published OCI chart, plus a values
+  file per environment, is a drop in replacement for the CI `publish` job triggering
+  deploys directly. Only who calls `helm` would change, nothing else.
+- **Node level autoscaling with Karpenter.** `iac/terraform/aws-eks/` currently sizes a
+  fixed EKS managed node group (`min_size`, `max_size`, `desired_size`). The HPA in this
+  chart already handles pod level autoscaling, but nothing resizes the nodes themselves.
+  Karpenter would provision right-sized (and spot-eligible) EC2 capacity directly
+  against pods that cannot be scheduled, instead of a fixed pool of one instance type.
+  Not added here because it is its own controller, with its own install and its own IAM
+  setup. That is more than a take-home's node group needs.
+- **Topology spread, or pod anti-affinity.** Right now prod's 3 to 10 replicas could
+  all land on the same node, and nothing stops that. A `topologySpreadConstraints`
+  block (or anti-affinity) would spread them across nodes or availability zones, so one
+  node failing does not take out every replica at once. Not built because it needs to
+  depend on the environment (dev runs a single replica, so spreading one pod means
+  nothing), and that is more chart logic than a take-home needs.
+- **A NetworkPolicy, default deny with explicit allow rules.** This would fit well with
+  the chart's existing security choices: non-root, read-only root filesystem, no
+  mounted token. Not shipped as a template because it only works if the cluster's CNI
+  actually enforces NetworkPolicies. On a cluster where it does not, the policy would
+  quietly do nothing, which is worse than not claiming the protection at all.
 
-- **Progressive delivery / canary.** The chart's `service` + `Deployment` selector
-  already isolate one release's Pods cleanly. The natural next step is a second,
-  weighted Service (or a mesh's traffic-split CRD) fed by the *same* values-file
-  pattern, e.g. `canary.weight: 10`, so a canary rollout is still "edit a values file,"
-  not a new workflow to learn.
-- **GitOps (ArgoCD) integration path.** This chart already assumes nothing about *how*
-  `helm upgrade` gets invoked, so handing it to an ArgoCD `Application` pointed at the
-  published OCI chart plus a values file per environment is a drop-in swap for the CI
-  `publish` job triggering deploys directly. No chart or values changes required, only
-  who calls `helm`.
+## Known gaps (said clearly, not hidden)
 
-## Known gaps (stated honestly, not hidden)
+These are the places a real production setup would be different from this take-home.
+Listed here on purpose, instead of leaving them for someone else to find:
 
-These are the places a real production setup would diverge from this take-home, called
-out explicitly rather than glossed over:
-
-- Model training happens inside the Docker build. A real pipeline trains once, versions
-  the artifact independently (MLflow/W&B plus a registry), and the serving image only
-  ever pulls a specific artifact version.
-- Liveness and readiness share one endpoint, safe only because this model loads
-  synchronously at import time. A model with slow/lazy loading needs genuinely separate
-  signals.
-- No scratch space (`emptyDir`) is exposed as a value despite `readOnlyRootFilesystem:
-  true`. This app needs none; a real model needing runtime caching would need that
-  added.
-- The CI/CD workflows and Terraform snippet reference a placeholder AWS account/registry
-  and neither has been run against real cloud infrastructure, by design.
+- Model training happens inside the Docker build. A real pipeline would train once,
+  version the artifact on its own (with MLflow, W&B, or a similar registry), and the
+  serving image would only ever pull one specific artifact version.
+- Liveness and readiness share one endpoint. This is only safe because this model loads
+  at import time, before the process can answer any request. A model that loads slowly
+  or lazily would need two separate signals.
+- There is no scratch space (`emptyDir`) exposed as a value, even though
+  `readOnlyRootFilesystem: true` is set. This app does not need one. A real model that
+  needs to cache something at runtime would need that added.
+- The CI/CD workflows and the Terraform code point at a placeholder AWS account and
+  registry. Neither has been run against real cloud infrastructure. This is on purpose.

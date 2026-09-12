@@ -1,6 +1,7 @@
 # Staging overrides only what differs from values.yaml.
-# Real registry pull (image.pullPolicy stays at the platform default),
-# more than one replica to catch rolling-update/multi-pod issues before prod.
+# This pulls from a real registry (image.pullPolicy stays at the platform
+# default), and runs more than one replica, to catch rolling update or
+# multi-pod issues before prod does.
 
 image:
   repository: 123456789012.dkr.ecr.us-east-1.amazonaws.com/ml-api

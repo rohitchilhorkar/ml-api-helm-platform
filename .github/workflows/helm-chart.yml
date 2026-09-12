@@ -1,7 +1,7 @@
 name: Helm Chart CI/CD
 
-# PRs only ever run the validate job: nothing is published from a PR.
-# Only a push to main (i.e. a merged PR) can reach the publish job.
+# PRs only run the validate job. Nothing is published from a PR.
+# Only a push to main, which means a merged PR, can reach the publish job.
 on:
   pull_request:
     paths:
@@ -10,6 +10,12 @@ on:
     branches: [main]
     paths:
       - "helm/**"
+
+# A second push to the same branch or PR replaces the first one.
+# There is no reason to let both runs finish.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 env:
   CHART_PATH: helm/ml-api
@@ -23,6 +29,9 @@ jobs:
   validate:
     name: Lint, Unit Test, Validate
     runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v4
 
@@ -60,10 +69,11 @@ jobs:
     needs: validate
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     permissions:
-      # id-token: write is what lets this job request an OIDC token from
-      # GitHub to exchange for short-lived AWS credentials - no AWS access
-      # keys are stored as repo secrets at all.
+      # id-token: write lets this job ask GitHub for an OIDC token.
+      # That token is traded for short-lived AWS credentials.
+      # No AWS access keys are stored as repo secrets at all.
       id-token: write
       contents: read
     steps:

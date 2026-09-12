@@ -1,8 +1,9 @@
-# Dev overrides only what differs from values.yaml (the platform defaults).
+# Dev overrides only what differs from values.yaml, the platform defaults.
 #
-# Local Minikube: the image is loaded directly into the node's runtime via
-# `minikube image load`, not pulled from any registry, so pullPolicy must be
-# Never - otherwise Kubernetes tries (and fails) to pull it from Docker Hub.
+# On local Minikube, the image is loaded straight into the node's runtime
+# with `minikube image load`, not pulled from any registry. So pullPolicy
+# must be Never. Otherwise Kubernetes tries to pull it from Docker Hub, and
+# that pull fails.
 
 image:
   pullPolicy: Never

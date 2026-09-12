@@ -8,4 +8,5 @@ app/model.pkl
 *.tfstate.*
 *.tfplan
 crash.log
+__snapshot__/
 docs/
