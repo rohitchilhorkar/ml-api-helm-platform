@@ -1,0 +1,8 @@
+ml-api has been deployed.
+
+Check status:
+  kubectl get pods -l app.kubernetes.io/instance={{ .Release.Name }}
+
+Reach the API locally:
+  kubectl port-forward svc/{{ include "ml-api.fullname" . }} 8000:{{ .Values.service.port }}
+  curl http://127.0.0.1:8000/health

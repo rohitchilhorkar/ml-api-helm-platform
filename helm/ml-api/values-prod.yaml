@@ -1,0 +1,21 @@
+# Prod overrides only what differs from values.yaml.
+# Autoscaling owns replica count here - replicaCount is intentionally not
+# set, since it would be ignored (and would be misleading to read) once
+# autoscaling.enabled is true.
+
+image:
+  repository: 123456789012.dkr.ecr.us-east-1.amazonaws.com/ml-api
+
+autoscaling:
+  enabled: true
+  minReplicas: 3
+  maxReplicas: 10
+  targetCPUUtilizationPercentage: 70
+
+resources:
+  requests:
+    cpu: 250m
+    memory: 256Mi
+  limits:
+    cpu: "1"
+    memory: 1Gi

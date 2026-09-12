@@ -1,0 +1,108 @@
+name: Helm Chart CI/CD
+
+# PRs only ever run the validate job: nothing is published from a PR.
+# Only a push to main (i.e. a merged PR) can reach the publish job.
+on:
+  pull_request:
+    paths:
+      - "helm/**"
+  push:
+    branches: [main]
+    paths:
+      - "helm/**"
+
+env:
+  CHART_PATH: helm/ml-api
+  CHART_NAME: ml-api
+  AWS_REGION: us-east-1
+  # Replace with the actual ECR registry for this account before use.
+  ECR_REGISTRY: 123456789012.dkr.ecr.us-east-1.amazonaws.com
+  ECR_REPOSITORY: helm-charts/ml-api
+
+jobs:
+  validate:
+    name: Lint, Unit Test, Validate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: v3.16.0
+
+      - name: Install helm-unittest plugin
+        run: helm plugin install --verify=false https://github.com/helm-unittest/helm-unittest.git
+
+      - name: Helm lint
+        run: helm lint "$CHART_PATH"
+
+      - name: Helm unit tests
+        run: helm unittest "$CHART_PATH"
+
+      - name: Render every environment's values
+        run: |
+          mkdir -p /tmp/rendered
+          for env in dev staging prod; do
+            helm template "$CHART_NAME" "$CHART_PATH" -f "$CHART_PATH/values-$env.yaml" > "/tmp/rendered/$env.yaml"
+          done
+
+      - name: Install kubeconform
+        run: |
+          curl -sSL https://github.com/yannh/kubeconform/releases/latest/download/kubeconform-linux-amd64.tar.gz | tar xz
+          sudo mv kubeconform /usr/local/bin/
+
+      - name: Validate rendered manifests against the Kubernetes schema
+        run: kubeconform -strict -summary /tmp/rendered/*.yaml
+
+  publish:
+    name: Package and Publish Chart
+    needs: validate
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      # id-token: write is what lets this job request an OIDC token from
+      # GitHub to exchange for short-lived AWS credentials - no AWS access
+      # keys are stored as repo secrets at all.
+      id-token: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: v3.16.0
+
+      - name: Read chart version
+        id: chart
+        run: echo "version=$(grep '^version:' $CHART_PATH/Chart.yaml | awk '{print $2}')" >> "$GITHUB_OUTPUT"
+
+      - name: Configure AWS credentials via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::123456789012:role/github-actions-helm-publish
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Log in to ECR (OCI registry)
+        run: |
+          aws ecr get-login-password --region "$AWS_REGION" \
+            | helm registry login --username AWS --password-stdin "$ECR_REGISTRY"
+
+      - name: Refuse to overwrite an already-published chart version
+        run: |
+          if aws ecr describe-images \
+              --repository-name "$ECR_REPOSITORY" \
+              --image-ids imageTag=${{ steps.chart.outputs.version }} \
+              --region "$AWS_REGION" >/dev/null 2>&1; then
+            echo "::error::Chart version ${{ steps.chart.outputs.version }} is already published. Bump version in Chart.yaml before merging."
+            exit 1
+          fi
+
+      - name: Package chart
+        run: helm package "$CHART_PATH" --destination /tmp/packaged
+
+      - name: Push chart to ECR
+        run: |
+          helm push "/tmp/packaged/${CHART_NAME}-${{ steps.chart.outputs.version }}.tgz" \
+            "oci://${ECR_REGISTRY}/${ECR_REPOSITORY}"

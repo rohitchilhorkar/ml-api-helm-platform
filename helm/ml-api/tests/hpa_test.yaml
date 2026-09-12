@@ -1,0 +1,28 @@
+suite: HPA conditional rendering
+templates:
+  - hpa.yaml
+
+tests:
+  - it: does not render by default
+    asserts:
+      - hasDocuments:
+          count: 0
+
+  - it: renders with the configured min/max/target when enabled
+    set:
+      autoscaling.enabled: true
+      autoscaling.minReplicas: 2
+      autoscaling.maxReplicas: 8
+      autoscaling.targetCPUUtilizationPercentage: 60
+    asserts:
+      - hasDocuments:
+          count: 1
+      - equal:
+          path: spec.minReplicas
+          value: 2
+      - equal:
+          path: spec.maxReplicas
+          value: 8
+      - equal:
+          path: spec.metrics[0].resource.target.averageUtilization
+          value: 60

@@ -1,0 +1,28 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: {{ include "ml-api.fullname" . }}-test-connection
+  labels:
+    {{- include "ml-api.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": test
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  restartPolicy: Never
+  containers:
+    - name: test
+      image: curlimages/curl:8.11.0
+      command:
+        - sh
+        - -c
+        - |
+          set -e
+          echo "Checking /health returns 200..."
+          curl -sf http://{{ include "ml-api.fullname" . }}:{{ .Values.service.port }}/health
+
+          echo "Checking /predict returns a prediction..."
+          RESPONSE=$(curl -sf -X POST http://{{ include "ml-api.fullname" . }}:{{ .Values.service.port }}/predict \
+            -H "Content-Type: application/json" \
+            -d '{"sepal_length":5.1,"sepal_width":3.5,"petal_length":1.4,"petal_width":0.2}')
+          echo "$RESPONSE"
+          echo "$RESPONSE" | grep -q "prediction"

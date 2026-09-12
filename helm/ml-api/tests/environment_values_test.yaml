@@ -1,0 +1,43 @@
+suite: environment values files render as expected
+templates:
+  - deployment.yaml
+  - hpa.yaml
+
+tests:
+  - it: dev uses Never pull policy and a small resource footprint
+    values:
+      - ../values-dev.yaml
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].imagePullPolicy
+          value: Never
+        template: deployment.yaml
+      - equal:
+          path: spec.template.spec.containers[0].resources.requests.cpu
+          value: 50m
+        template: deployment.yaml
+
+  - it: staging runs 2 replicas with platform-default resources
+    values:
+      - ../values-staging.yaml
+    asserts:
+      - equal:
+          path: spec.replicas
+          value: 2
+        template: deployment.yaml
+
+  - it: prod enables autoscaling and omits a fixed replica count
+    values:
+      - ../values-prod.yaml
+    asserts:
+      - notExists:
+          path: spec.replicas
+        template: deployment.yaml
+      - equal:
+          path: spec.minReplicas
+          value: 3
+        template: hpa.yaml
+      - equal:
+          path: spec.maxReplicas
+          value: 10
+        template: hpa.yaml

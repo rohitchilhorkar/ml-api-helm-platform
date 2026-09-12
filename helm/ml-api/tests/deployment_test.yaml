@@ -1,0 +1,55 @@
+suite: deployment defaults and overrides
+templates:
+  - deployment.yaml
+
+tests:
+  - it: defaults to a single replica
+    asserts:
+      - equal:
+          path: spec.replicas
+          value: 1
+
+  - it: uses the configured image repository and tag
+    set:
+      image.repository: my-custom-api
+      image.tag: v5
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].image
+          value: "my-custom-api:v5"
+
+  - it: enforces a non-root, locked-down security context
+    asserts:
+      - equal:
+          path: spec.template.spec.securityContext.runAsNonRoot
+          value: true
+      - equal:
+          path: spec.template.spec.containers[0].securityContext.readOnlyRootFilesystem
+          value: true
+      - equal:
+          path: spec.template.spec.containers[0].securityContext.allowPrivilegeEscalation
+          value: false
+
+  - it: omits the replicas field entirely when autoscaling is enabled
+    set:
+      autoscaling.enabled: true
+    asserts:
+      - notExists:
+          path: spec.replicas
+
+  - it: fails to render when image.tag is missing
+    set:
+      image.tag: null
+    asserts:
+      - failedTemplate:
+          errorMessage: "image.tag is required"
+
+  - it: injects MODEL_VERSION from image.tag
+    set:
+      image.tag: v7
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: MODEL_VERSION
+            value: "v7"

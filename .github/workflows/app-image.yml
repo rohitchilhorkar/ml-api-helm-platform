@@ -1,0 +1,104 @@
+name: App Image CI/CD
+
+# Builds and publishes the ml-api container image that the chart's
+# image.repository/image.tag values point at. Separate from
+# helm-chart.yml on purpose: the app and the chart version independently
+# (see the README's version-control section), so they get separate
+# pipelines with separate triggers.
+#
+# PRs only ever run the build-and-smoke-test job - nothing is pushed from a PR.
+# Only a push to main (i.e. a merged PR) can reach the publish job.
+on:
+  pull_request:
+    paths:
+      - "app/**"
+      - "helm/ml-api/Chart.yaml"
+  push:
+    branches: [main]
+    paths:
+      - "app/**"
+      - "helm/ml-api/Chart.yaml"
+
+env:
+  APP_PATH: app
+  AWS_REGION: us-east-1
+  # Replace with the actual ECR registry for this account before use.
+  ECR_REGISTRY: 123456789012.dkr.ecr.us-east-1.amazonaws.com
+  ECR_REPOSITORY: ml-api
+
+jobs:
+  build:
+    name: Build and Smoke Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Read app version
+        id: version
+        run: echo "tag=$(grep '^appVersion:' helm/ml-api/Chart.yaml | awk '{print $2}' | tr -d '\"')" >> "$GITHUB_OUTPUT"
+
+      - name: Build image
+        run: docker build -t ml-api:${{ steps.version.outputs.tag }} "$APP_PATH"
+
+      - name: Smoke test the built image
+        run: |
+          docker run -d --name ml-api-smoke -p 8000:8000 ml-api:${{ steps.version.outputs.tag }}
+          for i in $(seq 1 10); do
+            if curl -sf http://127.0.0.1:8000/health; then break; fi
+            sleep 2
+          done
+          curl -sf http://127.0.0.1:8000/health
+
+          RESPONSE=$(curl -sf -X POST http://127.0.0.1:8000/predict \
+            -H "Content-Type: application/json" \
+            -d '{"sepal_length":5.1,"sepal_width":3.5,"petal_length":1.4,"petal_width":0.2}')
+          echo "$RESPONSE" | grep -q "prediction"
+
+      - name: Tear down smoke test container
+        if: always()
+        run: docker rm -f ml-api-smoke || true
+
+  publish:
+    name: Push Image to ECR
+    needs: build
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      # id-token: write is what lets this job request an OIDC token from
+      # GitHub to exchange for short-lived AWS credentials - no AWS access
+      # keys are stored as repo secrets at all.
+      id-token: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Read app version
+        id: version
+        run: echo "tag=$(grep '^appVersion:' helm/ml-api/Chart.yaml | awk '{print $2}' | tr -d '\"')" >> "$GITHUB_OUTPUT"
+
+      - name: Configure AWS credentials via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::123456789012:role/github-actions-ecr-push
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Log in to ECR
+        run: |
+          aws ecr get-login-password --region "$AWS_REGION" \
+            | docker login --username AWS --password-stdin "$ECR_REGISTRY"
+
+      - name: Refuse to overwrite an already-published image tag
+        run: |
+          if aws ecr describe-images \
+              --repository-name "$ECR_REPOSITORY" \
+              --image-ids imageTag=${{ steps.version.outputs.tag }} \
+              --region "$AWS_REGION" >/dev/null 2>&1; then
+            echo "::error::Image tag ${{ steps.version.outputs.tag }} is already published. Bump appVersion in helm/ml-api/Chart.yaml before merging."
+            exit 1
+          fi
+
+      - name: Build and tag for ECR
+        run: docker build -t "$ECR_REGISTRY/$ECR_REPOSITORY:${{ steps.version.outputs.tag }}" "$APP_PATH"
+
+      - name: Push image
+        run: docker push "$ECR_REGISTRY/$ECR_REPOSITORY:${{ steps.version.outputs.tag }}"

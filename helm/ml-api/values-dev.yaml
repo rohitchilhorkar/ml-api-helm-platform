@@ -1,0 +1,16 @@
+# Dev overrides only what differs from values.yaml (the platform defaults).
+#
+# Local Minikube: the image is loaded directly into the node's runtime via
+# `minikube image load`, not pulled from any registry, so pullPolicy must be
+# Never - otherwise Kubernetes tries (and fails) to pull it from Docker Hub.
+
+image:
+  pullPolicy: Never
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 64Mi
+  limits:
+    cpu: 200m
+    memory: 256Mi

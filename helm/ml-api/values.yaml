@@ -1,0 +1,85 @@
+# Platform defaults. These are safe, generic values every environment inherits
+# unless a values-<env>.yaml file overrides them. An MLE onboarding a new ML API
+# to this chart typically only needs to touch image.repository/image.tag and env.
+
+image:
+  repository: ml-api
+  tag: v2
+  pullPolicy: IfNotPresent
+
+replicaCount: 1
+
+# Ignored when autoscaling.enabled is true - the HPA owns replica count then,
+# and replicaCount would only fight it on every `helm upgrade`.
+autoscaling:
+  enabled: false
+  minReplicas: 1
+  maxReplicas: 5
+  targetCPUUtilizationPercentage: 70
+
+# Arbitrary environment variables passed into the container, MLE-owned.
+# env:
+#   - name: LOG_LEVEL
+#     value: "info"
+env: []
+
+service:
+  type: ClusterIP
+  port: 80
+  targetPort: 8000
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    cpu: 500m
+    memory: 512Mi
+
+secrets:
+  # Name of a Kubernetes Secret that already exists in the cluster, created
+  # out-of-band (kubectl, a CI pipeline, or a real secrets operator like
+  # External Secrets / Sealed Secrets / the AWS Secrets Manager CSI driver).
+  # This is the production-safe path - preferred whenever it's set.
+  existingSecret: ""
+
+  # Chart-managed Secret, for local/demo convenience only. NEVER put real
+  # values here in a values-*.yaml file that gets committed to git - pass
+  # them with --set at install time instead, e.g.:
+  #   helm install ... --set secrets.create=true --set secrets.data.API_KEY=$API_KEY
+  # so the plaintext only ever exists in your shell/CI secret store, never
+  # in a file in this repo.
+  create: false
+  data: {}
+
+serviceAccount:
+  # Create a dedicated ServiceAccount for this release instead of using
+  # "default". automount is false because this API never calls the
+  # Kubernetes API itself - no reason to hand it a token that could do so.
+  create: true
+  automount: false
+  name: ""
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 10001
+  fsGroup: 10001
+
+containerSecurityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop:
+      - ALL
+
+probes:
+  liveness:
+    enabled: true
+    path: /health
+    initialDelaySeconds: 5
+    periodSeconds: 10
+  readiness:
+    enabled: true
+    path: /health
+    initialDelaySeconds: 5
+    periodSeconds: 10
